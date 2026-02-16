@@ -254,6 +254,14 @@ export interface BriefingResult {
   error?: string;
 }
 
+export interface OutreachMessages {
+  linkedin_conexao: string;
+  linkedin_followup: string;
+  email_assunto: string;
+  email_corpo: string;
+  ligacao: string;
+}
+
 // --- Configs para UI ---
 
 interface StatusConfig {
