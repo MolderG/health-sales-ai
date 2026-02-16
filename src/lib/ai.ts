@@ -81,10 +81,40 @@ Estruture o briefing com:
 
 // --- Análise de Interação ---
 
+const INTERACTION_SYSTEM_PROMPT = `Você é um assistente de vendas especializado em healthtech no Brasil, focado em análise de interações comerciais. Seu usuário é o Henrique, Regional Partner da WeKnow HealthTech no Paraná.
+
+**Sobre a WeKnow:** Plataforma de Business Intelligence para saúde que se conecta a sistemas hospitalares (Tasy, MV, Philips) e planilhas Excel, integra dados em painéis com indicadores de fácil entendimento. Foco: gestão estratégica, ocupação de leitos, centro cirúrgico, glosas, custos.
+
+**Metodologia de vendas — Miller Heiman (Strategic Selling):**
+- Identifique o papel de cada contato: Economic Buyer (decisor financeiro), Technical Buyer (avaliador técnico/TI), User Buyer (usuário final/gestores clínicos), Coach (aliado interno)
+- Avalie a posição de cada buyer: Growth (quer crescer), Trouble (tem problema urgente), Even Keel (satisfeito), Overconfident (não vê necessidade)
+- Sempre sugira próximos passos que avancem o deal com múltiplos stakeholders
+
+**Cadência multicanal recomendada:**
+- Dia 1: LinkedIn (conexão + mensagem personalizada)
+- Dia 3: Email de introdução com case relevante
+- Dia 5: Ligação para o decisor
+- Dia 8: WhatsApp com conteúdo de valor
+- Dia 12: Email de follow-up
+- Dia 15: Ligação final ou convite para evento/webinar
+
+**Segmentação por tipo de instituição:**
+- Hospitais grandes (>150 leitos): foco em ROI, integração com sistemas existentes, gestão de centro cirúrgico
+- Hospitais médios (50-150 leitos): foco em eficiência operacional, ocupação de leitos, redução de glosas
+- Hospitais pequenos (<50 leitos): foco em simplicidade, custo-benefício, substituição de planilhas
+- Clínicas e ambulatórios: foco em agendamento, produtividade médica, indicadores básicos
+- Operadoras de saúde: foco em gestão de rede, auditoria, indicadores de qualidade
+
+Ao analisar interações, considere o contexto completo: tipo de instituição, porte, estágio no funil, histórico de contatos e sentimento geral da negociação.`;
+
 interface InteractionContext {
   prospect_nome: string;
+  prospect_porte?: string | null;
+  prospect_tipo?: string | null;
+  prospect_status?: string | null;
   tipo_interacao: InteractionType;
   resumo: string;
+  detalhes?: string | null;
   historico?: string[];
 }
 
@@ -99,20 +129,24 @@ export async function analyzeInteraction(
   const userPrompt = `Analise esta interação comercial e responda APENAS com JSON puro (sem markdown, sem \`\`\`):
 
 **Prospect:** ${context.prospect_nome}
-**Tipo:** ${context.tipo_interacao}
+${context.prospect_tipo ? `**Tipo de estabelecimento:** ${context.prospect_tipo}` : ''}
+${context.prospect_porte ? `**Porte:** ${context.prospect_porte}` : ''}
+${context.prospect_status ? `**Status no funil:** ${context.prospect_status}` : ''}
+**Tipo de interação:** ${context.tipo_interacao}
 **Resumo:** ${context.resumo}
-${context.historico?.length ? `**Histórico:**\n${context.historico.map((h) => `- ${h}`).join('\n')}` : ''}
+${context.detalhes ? `**Detalhes:** ${context.detalhes}` : ''}
+${context.historico?.length ? `**Histórico recente:**\n${context.historico.map((h) => `- ${h}`).join('\n')}` : ''}
 
 Responda neste formato JSON:
 {
-  "proximos_passos": "descrição dos próximos passos recomendados",
+  "proximos_passos": "descrição concreta e acionável dos próximos passos recomendados (máximo 2-3 frases)",
   "sentimento": "positivo | neutro | negativo"
 }`;
 
   const completion = await openrouter.chat.completions.create({
     model: AI_MODEL,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: INTERACTION_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
