@@ -68,6 +68,10 @@ export default function ProspectPage() {
   // Briefing state
   const [generatingBriefing, setGeneratingBriefing] = useState(false);
 
+  // CNES state
+  const [refreshingCnes, setRefreshingCnes] = useState(false);
+  const [cnesError, setCnesError] = useState('');
+
   // Notes state
   const [notas, setNotas] = useState('');
 
@@ -145,6 +149,27 @@ export default function ProspectPage() {
       setBriefingError('Erro de conexão ao gerar briefing.');
     }
     setGeneratingBriefing(false);
+  }
+
+  async function handleRefreshCnes() {
+    setRefreshingCnes(true);
+    setCnesError('');
+    try {
+      const res = await fetch('/api/enrich/cnes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prospect_id: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCnesError(data.error || 'Erro ao buscar dados CNES.');
+      } else if (data.success && prospect) {
+        setProspect({ ...prospect, ...data.prospect });
+      }
+    } catch {
+      setCnesError('Erro de conexão ao buscar dados CNES.');
+    }
+    setRefreshingCnes(false);
   }
 
   async function handleSaveNotas() {
@@ -377,6 +402,77 @@ export default function ProspectPage() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Dados Hospitalares (CNES) */}
+            <div className="rounded-lg border border-zinc-200 bg-white p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-zinc-900">
+                  Dados Hospitalares (CNES)
+                </h3>
+                <button
+                  onClick={handleRefreshCnes}
+                  disabled={refreshingCnes}
+                  className="rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-200 disabled:opacity-50"
+                >
+                  {refreshingCnes ? 'Buscando...' : 'Atualizar dados CNES'}
+                </button>
+              </div>
+
+              {cnesError && (
+                <p className="mb-4 text-sm text-red-600">{cnesError}</p>
+              )}
+
+              {prospect.cnes_codigo ||
+              prospect.tipo_estabelecimento ||
+              prospect.leitos_total != null ? (
+                <div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {([
+                      ['Código CNES', prospect.cnes_codigo],
+                      ['Tipo de Estabelecimento', prospect.tipo_estabelecimento],
+                      ['Subtipo', prospect.subtipo],
+                    ] as [string, string | null][]).map(([label, value]) => (
+                      <div key={label}>
+                        <p className="text-xs text-zinc-500">{label}</p>
+                        <p className="mt-0.5 text-sm text-zinc-900">
+                          {value || 'N/A'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-3 gap-3">
+                    <div className="rounded-lg bg-zinc-50 p-3 text-center">
+                      <p className="text-xs text-zinc-500">Total de Leitos</p>
+                      <p className="mt-1 text-lg font-semibold text-zinc-900">
+                        {prospect.leitos_total ?? 'N/A'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-blue-50 p-3 text-center">
+                      <p className="text-xs text-blue-600">Leitos SUS</p>
+                      <p className="mt-1 text-lg font-semibold text-blue-700">
+                        {prospect.leitos_sus ?? 'N/A'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-amber-50 p-3 text-center">
+                      <p className="text-xs text-amber-600">Leitos Não-SUS</p>
+                      <p className="mt-1 text-lg font-semibold text-amber-700">
+                        {prospect.leitos_nao_sus ?? 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-zinc-300 py-8 text-center">
+                  <p className="text-sm text-zinc-500">
+                    Dados CNES não disponíveis para este estabelecimento
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Clique em &quot;Atualizar dados CNES&quot; para tentar novamente
+                  </p>
+                </div>
+              )}
             </div>
 
             {endereco && (
