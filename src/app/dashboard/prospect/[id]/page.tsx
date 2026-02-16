@@ -16,6 +16,7 @@ import type {
   Socio,
   AtividadeEconomica,
   Stakeholder,
+  OutreachMessages,
 } from '@/types/prospect';
 
 const INTERACTION_LABELS: Record<InteractionType, string> = {
@@ -53,7 +54,7 @@ function formatDate(dateStr: string | null) {
   });
 }
 
-type Tab = 'briefing' | 'dados' | 'interacoes';
+type Tab = 'briefing' | 'mensagens' | 'dados' | 'interacoes';
 
 export default function ProspectPage() {
   const params = useParams();
@@ -74,6 +75,16 @@ export default function ProspectPage() {
 
   // Notes state
   const [notas, setNotas] = useState('');
+
+  // Outreach messages state
+  const [generatingMessages, setGeneratingMessages] = useState(false);
+  const [messagesError, setMessagesError] = useState('');
+  const [outreachMessages, setOutreachMessages] = useState<OutreachMessages | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Decisor state
+  const [decisorNome, setDecisorNome] = useState('');
+  const [decisorCargo, setDecisorCargo] = useState('');
 
   // New interaction form
   const [showInteractionForm, setShowInteractionForm] = useState(false);
@@ -105,6 +116,12 @@ export default function ProspectPage() {
     if (prospectData) {
       setProspect(prospectData as Prospect);
       setNotas((prospectData as Prospect).notas || '');
+      setDecisorNome((prospectData as Prospect).decisor_nome || '');
+      setDecisorCargo((prospectData as Prospect).decisor_cargo || '');
+      const raw = (prospectData as Prospect).enrichment_raw;
+      if (raw?.outreach_messages) {
+        setOutreachMessages(raw.outreach_messages as OutreachMessages);
+      }
     }
     setInteractions((interactionsData as Interaction[]) || []);
     setLoading(false);
@@ -179,6 +196,43 @@ export default function ProspectPage() {
       .from('prospects')
       .update({ notas })
       .eq('id', prospect.id);
+  }
+
+  async function handleGenerateMessages() {
+    setGeneratingMessages(true);
+    setMessagesError('');
+    try {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prospect_id: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessagesError(data.error || 'Erro ao gerar mensagens.');
+      } else if (data.success) {
+        setOutreachMessages(data.messages as OutreachMessages);
+      }
+    } catch {
+      setMessagesError('Erro de conexão ao gerar mensagens.');
+    }
+    setGeneratingMessages(false);
+  }
+
+  function handleCopy(text: string, fieldName: string) {
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldName);
+    setTimeout(() => setCopiedField(null), 2000);
+  }
+
+  async function handleSaveDecisor(field: 'decisor_nome' | 'decisor_cargo', value: string) {
+    if (!prospect) return;
+    const supabase = createClient();
+    await supabase
+      .from('prospects')
+      .update({ [field]: value || null })
+      .eq('id', prospect.id);
+    setProspect({ ...prospect, [field]: value || null });
   }
 
   async function handleAddInteraction(e: React.FormEvent) {
@@ -314,6 +368,7 @@ export default function ProspectPage() {
       <div className="mt-6 flex gap-1 border-b border-zinc-200">
         {([
           ['briefing', 'Briefing IA'],
+          ['mensagens', 'Mensagens'],
           ['dados', 'Dados da Empresa'],
           ['interacoes', 'Interações'],
         ] as [Tab, string][]).map(([key, label]) => (
@@ -368,6 +423,103 @@ export default function ProspectPage() {
             {briefingError && (
               <p className="mt-4 text-sm text-red-600">{briefingError}</p>
             )}
+          </div>
+        )}
+
+        {/* --- Mensagens de Abordagem --- */}
+        {tab === 'mensagens' && (
+          <div className="space-y-4">
+            {!prospect.decisor_nome && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm text-amber-800">
+                  <span className="font-medium">Dica:</span> Preencha o nome e cargo do decisor na aba &quot;Dados da Empresa&quot; para mensagens mais personalizadas.
+                </p>
+              </div>
+            )}
+
+            <button
+              onClick={handleGenerateMessages}
+              disabled={generatingMessages}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {generatingMessages ? 'Gerando mensagens...' : 'Gerar Mensagens de Abordagem'}
+            </button>
+
+            {messagesError && (
+              <p className="text-sm text-red-600">{messagesError}</p>
+            )}
+
+            {outreachMessages ? (
+              <div className="space-y-4">
+                {/* LinkedIn Conexão */}
+                <div className="rounded-lg border border-zinc-200 bg-white p-6">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-zinc-900">LinkedIn — Conexão</h4>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs ${outreachMessages.linkedin_conexao.length > 300 ? 'font-medium text-red-600' : 'text-zinc-500'}`}>
+                        {outreachMessages.linkedin_conexao.length}/300
+                      </span>
+                      <button
+                        onClick={() => handleCopy(outreachMessages.linkedin_conexao, 'linkedin_conexao')}
+                        className="rounded-md bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
+                      >
+                        {copiedField === 'linkedin_conexao' ? 'Copiado!' : 'Copiar'}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm text-zinc-700">{outreachMessages.linkedin_conexao}</p>
+                </div>
+
+                {/* LinkedIn Follow-up */}
+                <div className="rounded-lg border border-zinc-200 bg-white p-6">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-zinc-900">LinkedIn — Follow-up</h4>
+                    <button
+                      onClick={() => handleCopy(outreachMessages.linkedin_followup, 'linkedin_followup')}
+                      className="rounded-md bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
+                    >
+                      {copiedField === 'linkedin_followup' ? 'Copiado!' : 'Copiar'}
+                    </button>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm text-zinc-700">{outreachMessages.linkedin_followup}</p>
+                </div>
+
+                {/* Email */}
+                <div className="rounded-lg border border-zinc-200 bg-white p-6">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-zinc-900">Email</h4>
+                    <button
+                      onClick={() => handleCopy(`Assunto: ${outreachMessages.email_assunto}\n\n${outreachMessages.email_corpo}`, 'email')}
+                      className="rounded-md bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
+                    >
+                      {copiedField === 'email' ? 'Copiado!' : 'Copiar'}
+                    </button>
+                  </div>
+                  <p className="mb-2 text-sm font-medium text-zinc-900">Assunto: {outreachMessages.email_assunto}</p>
+                  <p className="whitespace-pre-wrap text-sm text-zinc-700">{outreachMessages.email_corpo}</p>
+                </div>
+
+                {/* Ligação */}
+                <div className="rounded-lg border border-zinc-200 bg-white p-6">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-zinc-900">Ligação — Roteiro</h4>
+                    <button
+                      onClick={() => handleCopy(outreachMessages.ligacao, 'ligacao')}
+                      className="rounded-md bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
+                    >
+                      {copiedField === 'ligacao' ? 'Copiado!' : 'Copiar'}
+                    </button>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm text-zinc-700">{outreachMessages.ligacao}</p>
+                </div>
+              </div>
+            ) : !generatingMessages ? (
+              <div className="rounded-lg border border-dashed border-zinc-300 py-16 text-center">
+                <p className="text-sm text-zinc-500">
+                  Nenhuma mensagem gerada ainda.
+                </p>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -537,6 +689,36 @@ export default function ProspectPage() {
                 </ul>
               </div>
             )}
+
+            <div className="rounded-lg border border-zinc-200 bg-white p-6">
+              <h3 className="mb-4 text-sm font-semibold text-zinc-900">
+                Decisor
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-zinc-500">Nome do Decisor</label>
+                  <input
+                    type="text"
+                    value={decisorNome}
+                    onChange={(e) => setDecisorNome(e.target.value)}
+                    onBlur={() => handleSaveDecisor('decisor_nome', decisorNome)}
+                    placeholder="Nome do decisor..."
+                    className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500">Cargo</label>
+                  <input
+                    type="text"
+                    value={decisorCargo}
+                    onChange={(e) => setDecisorCargo(e.target.value)}
+                    onBlur={() => handleSaveDecisor('decisor_cargo', decisorCargo)}
+                    placeholder="Cargo do decisor..."
+                    className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                  />
+                </div>
+              </div>
+            </div>
 
             <div className="rounded-lg border border-zinc-200 bg-white p-6">
               <h3 className="mb-4 text-sm font-semibold text-zinc-900">
