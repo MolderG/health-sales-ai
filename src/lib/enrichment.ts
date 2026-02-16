@@ -1,5 +1,7 @@
 import type {
   BrasilApiResponse,
+  CnesSearchContext,
+  DataSusCnesResponse,
   EnrichmentResult,
   Prospect,
 } from '@/types/prospect';
@@ -28,6 +30,113 @@ export async function fetchCnpjData(cnpj: string): Promise<BrasilApiResponse> {
   }
 
   return response.json() as Promise<BrasilApiResponse>;
+}
+
+const CNES_API_BASE = 'https://apidadosabertos.saude.gov.br/cnes/estabelecimentos';
+const CNES_TIMEOUT_MS = 10_000;
+const CNES_REVALIDATE_S = 604_800; // 7 days
+
+export async function fetchCnesData(
+  cnpj: string,
+  context?: CnesSearchContext
+): Promise<DataSusCnesResponse | null> {
+  const cleaned = cleanCnpj(cnpj);
+
+  // Strategy 1: search by CNPJ
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CNES_TIMEOUT_MS);
+
+    const res = await fetch(`${CNES_API_BASE}?cnpj=${cleaned}`, {
+      signal: controller.signal,
+      next: { revalidate: CNES_REVALIDATE_S },
+      headers: { 'User-Agent': 'HealthSalesAI/1.0' },
+    });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const body = await res.json();
+      const items: DataSusCnesResponse[] = Array.isArray(body)
+        ? body
+        : body?.estabelecimentos ?? [];
+      if (items.length > 0) return items[0];
+    }
+  } catch (err) {
+    console.warn('[CNES] Busca por CNPJ falhou:', err);
+  }
+
+  // Strategy 2: search by nome_fantasia (fallback)
+  if (context?.nome_fantasia) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CNES_TIMEOUT_MS);
+
+      const params = new URLSearchParams({
+        nome_fantasia: context.nome_fantasia,
+      });
+      if (context.uf) params.set('uf', context.uf);
+
+      const res = await fetch(`${CNES_API_BASE}?${params}`, {
+        signal: controller.signal,
+        next: { revalidate: CNES_REVALIDATE_S },
+        headers: { 'User-Agent': 'HealthSalesAI/1.0' },
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const body = await res.json();
+        const items: DataSusCnesResponse[] = Array.isArray(body)
+          ? body
+          : body?.estabelecimentos ?? [];
+        if (items.length > 0) return items[0];
+      }
+    } catch (err) {
+      console.warn('[CNES] Busca por nome falhou:', err);
+    }
+  }
+
+  return null;
+}
+
+export function transformCnesData(raw: DataSusCnesResponse): Partial<Prospect> {
+  const cnes_codigo = String(
+    raw.codigo_cnes ?? raw.codCnes ?? raw.cod_cnes ?? ''
+  ) || null;
+
+  const tipo_estabelecimento =
+    raw.descricao_tipo_unidade ??
+    raw.tipoUnidadeCnes ??
+    raw.tipoUnidade ??
+    (raw.tipo_unidade != null ? String(raw.tipo_unidade) : null);
+
+  const subtipo = raw.categoria_unidade ?? raw.categoriaUnidade ?? null;
+
+  let leitos_sus =
+    raw.qt_leitos_sus ?? raw.leitos_sus ?? null;
+  let leitos_nao_sus =
+    raw.qt_leitos_nao_sus ?? raw.leitos_nao_sus ?? raw.numero_leitos_particular ?? null;
+  let leitos_total =
+    raw.numero_leitos_total ?? raw.qt_leitos_total ?? raw.numero_leitos ?? null;
+
+  // Calculate total from parts if missing
+  if (leitos_total == null && leitos_sus != null && leitos_nao_sus != null) {
+    leitos_total = leitos_sus + leitos_nao_sus;
+  }
+
+  const equipamentos = Array.isArray(raw.equipamentos) ? raw.equipamentos : [];
+  const habilitacoes = Array.isArray(raw.habilitacoes) ? raw.habilitacoes : [];
+
+  return {
+    cnes_codigo,
+    tipo_estabelecimento: tipo_estabelecimento ?? null,
+    subtipo: subtipo ?? null,
+    leitos_total: leitos_total != null ? Number(leitos_total) : null,
+    leitos_sus: leitos_sus != null ? Number(leitos_sus) : null,
+    leitos_nao_sus: leitos_nao_sus != null ? Number(leitos_nao_sus) : null,
+    equipamentos,
+    habilitacoes,
+    dados_cnes_raw: raw as Record<string, unknown>,
+  };
 }
 
 export function transformCnpjData(raw: BrasilApiResponse): Partial<Prospect> {
@@ -108,8 +217,19 @@ export async function enrichProspect(cnpj: string): Promise<EnrichmentResult> {
 
   const prospectData = transformCnpjData(raw);
 
-  // TODO: Integrar dados do CNES (Cadastro Nacional de Estabelecimentos de Saúde)
-  // para enriquecer com tipo_estabelecimento, leitos, equipamentos, habilitações.
+  // Enriquecer com dados CNES (DataSUS)
+  try {
+    const cnesRaw = await fetchCnesData(cnpj, {
+      nome_fantasia: raw.nome_fantasia,
+      municipio: raw.municipio,
+      uf: raw.uf,
+    });
+    if (cnesRaw) {
+      Object.assign(prospectData, transformCnesData(cnesRaw));
+    }
+  } catch (err) {
+    console.warn('[CNES] Enrichment failed, continuing without CNES data:', err);
+  }
 
   return {
     success: true,
