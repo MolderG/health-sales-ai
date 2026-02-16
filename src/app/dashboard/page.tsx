@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/types/prospect';
 import type { ProspectWithStats } from '@/types/prospect';
+import PipelineView from '@/components/pipeline-view';
 
 function formatCnpj(cnpj: string) {
   const c = cnpj.replace(/\D/g, '');
@@ -16,6 +17,7 @@ function formatCnpj(cnpj: string) {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const [view, setView] = useState<'lista' | 'pipeline'>('lista');
   const [prospects, setProspects] = useState<ProspectWithStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -92,16 +94,40 @@ export default function DashboardPage() {
             {prospects.length === 1 ? 'prospect' : 'prospects'}
           </p>
         </div>
-        <button
-          onClick={() => {
-            setModalOpen(true);
-            setCnpjInput('');
-            setModalError('');
-          }}
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
-        >
-          + Adicionar Prospect
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-zinc-200">
+            <button
+              onClick={() => setView('lista')}
+              className={`rounded-l-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                view === 'lista'
+                  ? 'bg-zinc-900 text-white'
+                  : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+              }`}
+            >
+              Lista
+            </button>
+            <button
+              onClick={() => setView('pipeline')}
+              className={`rounded-r-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                view === 'pipeline'
+                  ? 'bg-zinc-900 text-white'
+                  : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+              }`}
+            >
+              Pipeline
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              setModalOpen(true);
+              setCnpjInput('');
+              setModalError('');
+            }}
+            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+          >
+            + Adicionar Prospect
+          </button>
+        </div>
       </div>
 
       {prospects.length === 0 ? (
@@ -116,6 +142,8 @@ export default function DashboardPage() {
             Adicionar primeiro prospect
           </button>
         </div>
+      ) : view === 'pipeline' ? (
+        <PipelineView prospects={prospects} />
       ) : (
         <div className="mt-4 space-y-2">
           {prospects.map((p) => {
