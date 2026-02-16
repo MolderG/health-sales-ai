@@ -77,6 +77,13 @@ export default function ProspectPage() {
     useState<InteractionType>('ligacao');
   const [newInteractionResumo, setNewInteractionResumo] = useState('');
   const [savingInteraction, setSavingInteraction] = useState(false);
+  const [analyzingInteraction, setAnalyzingInteraction] = useState(false);
+  const [lastAnalise, setLastAnalise] = useState<{
+    proximos_passos: string;
+    sentimento: string;
+  } | null>(null);
+  const [showProximoContatoPicker, setShowProximoContatoPicker] = useState(false);
+  const [proximoContatoDate, setProximoContatoDate] = useState('');
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
@@ -153,32 +160,48 @@ export default function ProspectPage() {
     e.preventDefault();
     if (!prospect) return;
     setSavingInteraction(true);
+    setAnalyzingInteraction(true);
+    setLastAnalise(null);
 
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      const res = await fetch('/api/interactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prospect_id: prospect.id,
+          tipo: newInteractionType,
+          resumo: newInteractionResumo,
+        }),
+      });
 
-    if (!user) return;
+      const data = await res.json();
 
-    const { data: newInteraction } = await supabase
-      .from('interactions')
-      .insert({
-        user_id: user.id,
-        prospect_id: prospect.id,
-        tipo: newInteractionType,
-        resumo: newInteractionResumo,
-      })
-      .select()
-      .single();
-
-    if (newInteraction) {
-      setInteractions([newInteraction as Interaction, ...interactions]);
+      if (res.ok && data.success) {
+        setInteractions([data.interaction as Interaction, ...interactions]);
+        if (data.analise) {
+          setLastAnalise(data.analise);
+        }
+      }
+    } catch {
+      // Silently handle - interaction may have been saved without analysis
     }
 
     setNewInteractionResumo('');
     setShowInteractionForm(false);
     setSavingInteraction(false);
+    setAnalyzingInteraction(false);
+  }
+
+  async function handleSetProximoContato() {
+    if (!prospect || !proximoContatoDate) return;
+    const supabase = createClient();
+    await supabase
+      .from('prospects')
+      .update({ proximo_contato: proximoContatoDate })
+      .eq('id', prospect.id);
+    setProspect({ ...prospect, proximo_contato: proximoContatoDate });
+    setShowProximoContatoPicker(false);
+    setProximoContatoDate('');
   }
 
   if (loading) {
@@ -501,12 +524,100 @@ export default function ProspectPage() {
                       disabled={savingInteraction}
                       className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
                     >
-                      {savingInteraction ? 'Salvando...' : 'Salvar'}
+                      {savingInteraction ? 'Salvando e analisando...' : 'Salvar'}
                     </button>
                   </div>
                 </form>
               )}
             </div>
+
+            {analyzingInteraction && (
+              <div className="mb-4 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <svg
+                  className="h-5 w-5 animate-spin text-blue-600"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                <span className="text-sm font-medium text-blue-700">
+                  Analisando interação com IA...
+                </span>
+              </div>
+            )}
+
+            {lastAnalise && !analyzingInteraction && (
+              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-blue-900">
+                    Análise da IA
+                  </h4>
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                      lastAnalise.sentimento === 'positivo'
+                        ? 'bg-green-100 text-green-800'
+                        : lastAnalise.sentimento === 'negativo'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-yellow-100 text-yellow-800'
+                    }`}
+                  >
+                    {lastAnalise.sentimento === 'positivo'
+                      ? 'Positivo'
+                      : lastAnalise.sentimento === 'negativo'
+                        ? 'Negativo'
+                        : 'Neutro'}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-blue-800">
+                  {lastAnalise.proximos_passos}
+                </p>
+                <div className="mt-3">
+                  {!showProximoContatoPicker ? (
+                    <button
+                      onClick={() => setShowProximoContatoPicker(true)}
+                      className="rounded-md bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-200"
+                    >
+                      Definir próximo contato
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="datetime-local"
+                        value={proximoContatoDate}
+                        onChange={(e) => setProximoContatoDate(e.target.value)}
+                        className="rounded-md border border-blue-300 px-2 py-1 text-sm text-zinc-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <button
+                        onClick={handleSetProximoContato}
+                        disabled={!proximoContatoDate}
+                        className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        onClick={() => setShowProximoContatoPicker(false)}
+                        className="rounded-md px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {interactions.length === 0 ? (
               <div className="rounded-lg border border-dashed border-zinc-300 py-16 text-center">
@@ -528,6 +639,23 @@ export default function ProspectPage() {
                       <span className="text-xs text-zinc-500">
                         {formatDate(interaction.data_interacao)}
                       </span>
+                      {interaction.sentimento && (
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                            interaction.sentimento === 'positivo'
+                              ? 'bg-green-100 text-green-800'
+                              : interaction.sentimento === 'negativo'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                          }`}
+                        >
+                          {interaction.sentimento === 'positivo'
+                            ? 'Positivo'
+                            : interaction.sentimento === 'negativo'
+                              ? 'Negativo'
+                              : 'Neutro'}
+                        </span>
+                      )}
                     </div>
                     <p className="mt-2 text-sm text-zinc-700">
                       {interaction.resumo}
