@@ -187,6 +187,56 @@ export interface BrasilApiResponse {
   }[];
 }
 
+// --- CNES (DataSUS) ---
+
+export interface CnesSearchContext {
+  nome_fantasia?: string | null;
+  municipio?: string | null;
+  uf?: string | null;
+}
+
+export interface DataSusCnesResponse {
+  // Identificação (campo pode vir em formatos diferentes)
+  codigo_cnes?: number;
+  codCnes?: string;
+  cod_cnes?: string;
+  cnpj?: string;
+  // Dados do estabelecimento
+  nome_fantasia?: string;
+  nomeFantasia?: string;
+  tipo_unidade?: number;
+  tipoUnidade?: string;
+  descricao_tipo_unidade?: string;
+  tipoUnidadeCnes?: string;
+  categoria_unidade?: string;
+  categoriaUnidade?: string;
+  esfera_administrativa?: string;
+  esferaAdministrativa?: string;
+  vinculo_sus?: string;
+  vinculoSus?: string;
+  // Serviços (flags booleanas)
+  temAtendimentoUrgencia?: boolean;
+  temAtendimentoAmbulatorial?: boolean;
+  temCentroCirurgico?: boolean;
+  temObstetra?: boolean;
+  temNeoNatal?: boolean;
+  temDialise?: boolean;
+  // Leitos (nomes de campo incertos — tratar variantes)
+  numero_leitos_total?: number;
+  numero_leitos_particular?: number;
+  numero_leitos?: number;
+  qt_leitos_total?: number;
+  qt_leitos_sus?: number;
+  qt_leitos_nao_sus?: number;
+  leitos_sus?: number;
+  leitos_nao_sus?: number;
+  // Equipamentos e habilitações (se disponíveis)
+  equipamentos?: unknown[];
+  habilitacoes?: unknown[];
+  // Catch-all
+  [key: string]: unknown;
+}
+
 // --- Resultados de processamento ---
 
 export interface EnrichmentResult {
