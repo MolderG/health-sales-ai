@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import type { InteractionType, Stakeholder } from '@/types/prospect';
+import type { InteractionType, Stakeholder, OutreachMessages } from '@/types/prospect';
 
 const openrouter = new OpenAI({
   baseURL: 'https://openrouter.ai/api/v1',
@@ -161,6 +161,158 @@ Responda neste formato JSON:
     return {
       proximos_passos: raw || 'Não foi possível analisar a interação.',
       sentimento: 'neutro',
+    };
+  }
+}
+
+// --- Segmentação de Prospect ---
+
+type ProspectSegment = 'hospital_filantropico' | 'hospital' | 'holding_grupo' | 'operadora' | 'clinica' | 'saude';
+
+function classifyProspectSegment(context: OutreachContext): ProspectSegment {
+  const natureza = (context.natureza_juridica || '').toLowerCase();
+  const atividadeDesc = (context.atividade_principal?.descricao || '').toLowerCase();
+  const sociosText = (context.socios || []).map(s => (s.qualificacao || '').toLowerCase()).join(' ');
+
+  if (natureza.includes('filantrópic') || natureza.includes('filantropic')) {
+    return 'hospital_filantropico';
+  }
+
+  if ((context.capital_social && context.capital_social > 10_000_000) || sociosText.includes('holding')) {
+    return 'holding_grupo';
+  }
+
+  if (atividadeDesc.includes('hospitalar') || atividadeDesc.includes('hospital')) {
+    return 'hospital';
+  }
+
+  if (atividadeDesc.includes('operadora') || atividadeDesc.includes('plano') || atividadeDesc.includes('saúde suplementar')) {
+    return 'operadora';
+  }
+
+  if (atividadeDesc.includes('clínica') || atividadeDesc.includes('diagnóstico') || atividadeDesc.includes('laboratório')) {
+    return 'clinica';
+  }
+
+  return 'saude';
+}
+
+// --- Geração de Mensagens de Abordagem ---
+
+interface OutreachContext {
+  nome_fantasia: string | null;
+  razao_social: string | null;
+  porte: string | null;
+  capital_social: number | null;
+  atividade_principal: { codigo: string; descricao: string } | null;
+  natureza_juridica: string | null;
+  endereco: { municipio?: string; uf?: string } | null;
+  socios: { nome: string; qualificacao?: string }[] | null;
+  tipo_estabelecimento: string | null;
+  leitos_total: number | null;
+  sistema_gestao: string | null;
+  decisor_nome: string | null;
+  decisor_cargo: string | null;
+  stakeholders: Stakeholder[] | null;
+  interacoes_anteriores?: string[];
+}
+
+const OUTREACH_SYSTEM_PROMPT = `Você é um especialista em copywriting de vendas B2B no setor de saúde brasileiro. Você escreve mensagens de prospecção para o Henrique, Regional Partner da WeKnow HealthTech no Paraná.
+
+**Sobre a WeKnow:** Plataforma de Business Intelligence para saúde que se conecta a sistemas hospitalares (Tasy, MV, Philips) e planilhas Excel, integra dados em painéis com indicadores de fácil entendimento. Foco: gestão estratégica, ocupação de leitos, centro cirúrgico, glosas, custos.
+
+**Regras de abordagem consultiva:**
+- Tom profissional mas humano, nunca robótico ou genérico
+- Personalizar com dados reais da instituição (nome, porte, tipo, localização)
+- Mencionar dores específicas do segmento
+- Nunca fazer pitch direto — sempre oferecer valor primeiro (insight, case, convite)
+- Se houver decisor identificado, personalizar com nome e cargo
+- Referenciar cases relevantes quando possível
+
+**Formatos por canal:**
+1. **LinkedIn Conexão** (máx 300 caracteres): Mensagem curta para pedido de conexão. Mencionar algo específico da instituição. Sem pitch.
+2. **LinkedIn Follow-up**: Mensagem após aceite da conexão. Oferecer insight ou conteúdo relevante. Pode ser mais longa.
+3. **Email**: Assunto curto e direto (sem "RE:" fake). Corpo com gancho personalizado, 1 case/dado relevante, CTA claro para conversa de 15min.
+4. **Ligação — Roteiro**: Script de ligação com: abertura (quem sou, por que ligo), gancho de valor, perguntas de qualificação, CTA para reunião.
+
+**Segmentação por tipo de instituição:**
+- Hospital filantrópico: foco em eficiência com recursos limitados, compliance SUS, gestão de glosas SUS
+- Hospital grande (>150 leitos): foco em ROI, integração com sistemas existentes, gestão de centro cirúrgico
+- Hospital médio/pequeno: foco em eficiência operacional, substituição de planilhas, ocupação de leitos
+- Holding/grupo: foco em consolidação de dados multi-unidade, benchmarking entre unidades, visão corporativa
+- Operadora de saúde: foco em gestão de rede, auditoria, indicadores de qualidade
+- Clínica/diagnóstico: foco em agendamento, produtividade, indicadores básicos
+
+**Cases de referência:**
+- Hospital filantrópico no PR reduziu glosas em 35% em 6 meses
+- Grupo hospitalar consolidou dados de 4 unidades em dashboard único
+- Hospital de 200 leitos aumentou ocupação em 12% com painel de gestão de leitos
+
+Responda APENAS com JSON puro (sem markdown, sem \`\`\`) com as chaves: linkedin_conexao, linkedin_followup, email_assunto, email_corpo, ligacao.`;
+
+export async function generateOutreachMessages(context: OutreachContext): Promise<OutreachMessages> {
+  const nomeInstituicao = context.nome_fantasia || context.razao_social || 'Instituição';
+  const segmento = classifyProspectSegment(context);
+
+  const segmentoLabels: Record<ProspectSegment, string> = {
+    hospital_filantropico: 'Hospital Filantrópico',
+    hospital: 'Hospital',
+    holding_grupo: 'Holding / Grupo Hospitalar',
+    operadora: 'Operadora de Saúde',
+    clinica: 'Clínica / Diagnóstico',
+    saude: 'Instituição de Saúde',
+  };
+
+  const userPrompt = `Gere mensagens de prospecção personalizadas para a seguinte instituição:
+
+**Instituição:** ${nomeInstituicao}
+**Razão Social:** ${context.razao_social || 'N/A'}
+**Segmento identificado:** ${segmentoLabels[segmento]}
+**Porte:** ${context.porte || 'N/A'}
+**Capital Social:** ${context.capital_social ? `R$ ${context.capital_social.toLocaleString('pt-BR')}` : 'N/A'}
+**Natureza Jurídica:** ${context.natureza_juridica || 'N/A'}
+**Atividade Principal:** ${context.atividade_principal ? `${context.atividade_principal.codigo} - ${context.atividade_principal.descricao}` : 'N/A'}
+**Localização:** ${context.endereco ? `${context.endereco.municipio || ''} - ${context.endereco.uf || ''}` : 'N/A'}
+**Sócios:** ${context.socios?.map((s) => `${s.nome} (${s.qualificacao || 'N/I'})`).join(', ') || 'N/A'}
+
+**Tipo de Estabelecimento:** ${context.tipo_estabelecimento || 'N/A'}
+**Leitos Total:** ${context.leitos_total ?? 'N/A'}
+**Sistema de Gestão Atual:** ${context.sistema_gestao || 'Não identificado'}
+
+**Decisor:** ${context.decisor_nome ? `${context.decisor_nome} (${context.decisor_cargo || 'cargo N/I'})` : 'Não identificado'}
+**Stakeholders:** ${context.stakeholders?.map((s) => `${s.nome} - ${s.cargo} (${s.papel_miller_heiman})`).join('; ') || 'Não mapeados'}
+${context.interacoes_anteriores?.length ? `**Interações anteriores:**\n${context.interacoes_anteriores.map((i) => `- ${i}`).join('\n')}` : ''}
+
+Gere as 5 mensagens personalizadas em JSON puro:
+{
+  "linkedin_conexao": "mensagem curta para pedido de conexão (máx 300 chars)",
+  "linkedin_followup": "mensagem de follow-up após conexão aceita",
+  "email_assunto": "assunto do email",
+  "email_corpo": "corpo do email completo",
+  "ligacao": "roteiro completo de ligação"
+}`;
+
+  const completion = await openrouter.chat.completions.create({
+    model: AI_MODEL,
+    messages: [
+      { role: 'system', content: OUTREACH_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.7,
+    max_tokens: 1500,
+  });
+
+  const raw = completion.choices[0]?.message?.content || '';
+
+  try {
+    return JSON.parse(raw) as OutreachMessages;
+  } catch {
+    return {
+      linkedin_conexao: 'Erro ao gerar mensagem. Tente novamente.',
+      linkedin_followup: 'Erro ao gerar mensagem. Tente novamente.',
+      email_assunto: 'Erro ao gerar mensagem. Tente novamente.',
+      email_corpo: 'Erro ao gerar mensagem. Tente novamente.',
+      ligacao: 'Erro ao gerar mensagem. Tente novamente.',
     };
   }
 }
