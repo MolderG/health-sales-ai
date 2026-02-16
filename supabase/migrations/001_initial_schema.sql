@@ -190,6 +190,14 @@ create policy "Users can insert own briefings"
   on briefings for insert
   with check (auth.uid() = user_id);
 
+create policy "Users can update own briefings"
+  on briefings for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete own briefings"
+  on briefings for delete
+  using (auth.uid() = user_id);
+
 -- 10. Trigger para atualizar updated_at automaticamente
 create or replace function update_updated_at()
 returns trigger as $$
